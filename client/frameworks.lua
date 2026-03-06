@@ -21,8 +21,13 @@ function Utils.HasGroup(filter)
                    (PlayerData.gang and PlayerData.gang.name == filter) or 
                    (PlayerData.citizenid == filter)
         elseif _type == 'table' then
-            local tabletype = table.type(filter)
-            if tabletype == 'hash' then
+            -- Safely determine if the table is an array or hash
+            local isArray = true
+            for k in pairs(filter) do
+                if type(k) ~= 'number' then isArray = false break end
+            end
+
+            if not isArray then -- Hashmap
                 for name, grade in pairs(filter) do
                     if (PlayerData.job and PlayerData.job.name == name and PlayerData.job.grade.level >= grade) or
                        (PlayerData.gang and PlayerData.gang.name == name and PlayerData.gang.grade.level >= grade) or
@@ -30,7 +35,7 @@ function Utils.HasGroup(filter)
                         return true
                     end
                 end
-            elseif tabletype == 'array' then
+            else -- Array
                 for i = 1, #filter do
                     local name = filter[i]
                     if (PlayerData.job and PlayerData.job.name == name) or
@@ -48,12 +53,16 @@ function Utils.HasGroup(filter)
         if _type == 'string' then
             return PlayerData.job.name == filter
         elseif _type == 'table' then
-            local tabletype = table.type(filter)
-            if tabletype == 'hash' then
+            local isArray = true
+            for k in pairs(filter) do
+                if type(k) ~= 'number' then isArray = false break end
+            end
+
+            if not isArray then
                 for name, grade in pairs(filter) do
                     if PlayerData.job.name == name and PlayerData.job.grade >= grade then return true end
                 end
-            elseif tabletype == 'array' then
+            else
                 for i = 1, #filter do
                     if PlayerData.job.name == filter[i] then return true end
                 end

@@ -323,23 +323,31 @@ RegisterNUICallback('clicked', function(data, cb)
 
         CloseMenu()
 
-        local response = {
-            entity = currentTarget.entity,
-            coords = currentTarget.coords,
-            distance = currentTarget.distance,
-            zone = option.zoneId,
-            bone = option.matchedBone
-        }
+        local response = {}
+        for k, v in pairs(option) do
+            response[k] = v
+        end
+        
+        response.entity = currentTarget.entity
+        response.coords = currentTarget.coords
+        response.distance = currentTarget.distance
+        response.zone = option.zoneId
+        response.bone = option.matchedBone
+
+        response.onSelect = nil
+        response.action = nil
+        response.canInteract = nil
 
         if option.onSelect or option.action then
             local func = option.onSelect or option.action
             func(option.qtarget and currentTarget.entity or response)
         elseif option.export then
-            local exportParts = stringSplit(option.export, ".")
-            if #exportParts == 2 then
+            if string.find(option.export, "%.") then
+                local exportParts = stringSplit(option.export, ".")
                 exports[exportParts[1]][exportParts[2]](nil, response)
             else
-                print("^1[ak47_target] Invalid export format. Use 'resource.exportName'^0")
+                local resource = option.resource or "unknown"
+                exports[resource][option.export](nil, response)
             end
         elseif option.event then
             TriggerEvent(option.event, response)

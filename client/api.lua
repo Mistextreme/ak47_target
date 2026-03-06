@@ -61,6 +61,13 @@ end
 ---@param tbl table The target table to remove from
 ---@param labels string|string[] The name or label of the option(s) to remove
 local function RemoveTargetFromTable(tbl, labels)
+    if labels == nil then
+        for i = #tbl, 1, -1 do
+            table.remove(tbl, i)
+        end
+        return
+    end
+
     if type(labels) ~= 'table' then labels = {labels} end
     for i = #tbl, 1, -1 do
         for _, label in ipairs(labels) do
