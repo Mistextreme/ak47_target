@@ -165,7 +165,9 @@ local function StartTargeting()
         local flag = 511
         local lastPayloadCount = 0
 
-        RequestStreamedTextureDict('shared', false)
+        if Config.ShowZoneBubble and not HasStreamedTextureDictLoaded('shared') then
+            RequestStreamedTextureDict('shared', false)
+        end
 
         while isTargeting do
             if IsPauseMenuActive() then
@@ -200,7 +202,7 @@ local function StartTargeting()
 
                 local model = (entityHit > 0 and entityType > 0) and GetEntityModel(entityHit) or nil
                 
-                if HasStreamedTextureDictLoaded('shared') then
+                if Config.ShowZoneBubble and HasStreamedTextureDictLoaded('shared') then
                     DrawZoneSprites('shared', 'emptydot_32', playerCoords, GetNearbyZones(endCoords))
                 end
 
@@ -296,7 +298,9 @@ local function StartTargeting()
             Wait(hit and 1 or 100) 
         end
         
-        SetStreamedTextureDictAsNoLongerNeeded('shared')
+        if Config.ShowZoneBubble and HasStreamedTextureDictLoaded('shared') then
+            SetStreamedTextureDictAsNoLongerNeeded('shared')
+        end
     end)
 end
 
