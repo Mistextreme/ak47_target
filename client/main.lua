@@ -247,13 +247,15 @@ local function StartTargeting()
                 end
 
                 if IsDisabledControlJustReleased(0, 24) and hasTarget then 
-                    currentTarget = { entity = entityHit, coords = endCoords, distance = distance }
-                    isTargeting = false
-                    isMenuOpen = true
-                    
                     SetCursorLocation(0.5, 0.5)
                     SendNUIMessage({ type = "focus" })
                     SetNuiFocus(true, true) 
+                    
+                    Wait(10)
+
+                    currentTarget = { entity = entityHit, coords = endCoords, distance = distance }
+                    isTargeting = false
+                    isMenuOpen = true
 
                     if currentTarget.entity and currentTarget.entity > 0 then
                         CreateThread(function()

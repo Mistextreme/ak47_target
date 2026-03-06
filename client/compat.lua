@@ -193,7 +193,7 @@ ExportHandler('AddCircleZone', function(isQtarget, invokingResource, name, cente
 
     return exports['ak47_target']:addSphereZone({
         name = name,
-        coords = center,
+        coords = vector3(center.x, center.y, center.z),
         radius = radius,
         debug = options.debugPoly,
         options = formattedOpts,
