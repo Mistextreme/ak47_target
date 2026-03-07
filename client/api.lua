@@ -11,7 +11,8 @@ TargetAPI = {
     Entities = {},
     LocalEntities = {},
     Globals = {},
-    Zones = {}
+    Zones = {},
+    Grid = {},
 }
 
 local isDisabled = false
@@ -327,14 +328,6 @@ end
 exports('addPolyZone', addPolyZone)
 ExportHandler('addPolyZone', addPolyZone)
 
-local function removeZone(id)
-    if TargetAPI.Zones[id] then 
-        TargetAPI.Zones[id] = nil 
-    end
-end
-exports('removeZone', removeZone)
-ExportHandler('removeZone', removeZone)
-
 -- =================================================================
 -- 8. RESOURCE STOP CLEANUP (AUTO-REMOVE TARGETS & ZONES)
 -- =================================================================
@@ -364,10 +357,14 @@ AddEventHandler('onResourceStop', function(resourceName)
     end
 
     if TargetAPI.Zones then
+        local zonesToRemove = {}
         for id, zone in pairs(TargetAPI.Zones) do
             if zone.resource == resourceName then
-                TargetAPI.Zones[id] = nil
+                table.insert(zonesToRemove, id)
             end
+        end
+        for _, id in ipairs(zonesToRemove) do
+            removeZone(id)
         end
     end
 end)

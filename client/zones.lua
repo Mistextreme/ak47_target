@@ -1,5 +1,40 @@
 local zoneIdCounter = 0
 local isDebugging = false
+local CHUNK_SIZE = 50.0
+
+local function GetChunkCoords(x, y)
+    return math.floor(x / CHUNK_SIZE), math.floor(y / CHUNK_SIZE)
+end
+
+local function AddZoneToGrid(zone)
+    local minX = zone.coords.x - zone.data.maxRadius
+    local maxX = zone.coords.x + zone.data.maxRadius
+    local minY = zone.coords.y - zone.data.maxRadius
+    local maxY = zone.coords.y + zone.data.maxRadius
+
+    local startCX, startCY = GetChunkCoords(minX, minY)
+    local endCX, endCY = GetChunkCoords(maxX, maxY)
+
+    zone.chunks = {}
+    for cx = startCX, endCX do
+        if not TargetAPI.Grid[cx] then TargetAPI.Grid[cx] = {} end
+        for cy = startCY, endCY do
+            if not TargetAPI.Grid[cx][cy] then TargetAPI.Grid[cx][cy] = {} end
+            TargetAPI.Grid[cx][cy][zone.id] = zone
+            table.insert(zone.chunks, {x = cx, y = cy})
+        end
+    end
+end
+
+local function RemoveZoneFromGrid(zone)
+    if not zone.chunks then return end
+    for _, chunk in ipairs(zone.chunks) do
+        if TargetAPI.Grid[chunk.x] and TargetAPI.Grid[chunk.x][chunk.y] then
+            TargetAPI.Grid[chunk.x][chunk.y][zone.id] = nil
+        end
+    end
+    zone.chunks = nil
+end
 
 -- ==========================================
 -- 3D VISUAL DEBUG RENDERERS
@@ -55,15 +90,24 @@ local function StartDebugThread()
             Wait(0)
             local hasActive = false
             local plyCoords = GetEntityCoords(PlayerPedId())
+            local cx, cy = GetChunkCoords(plyCoords.x, plyCoords.y)
 
-            for _, zone in pairs(TargetAPI.Zones) do
-                if zone.debug then
-                    hasActive = true
-                    local checkCoord = zone.type == 'poly' and zone.data.points[1] or zone.coords
-                    if #(plyCoords - checkCoord) < 50.0 then
-                        if zone.type == 'box' then DrawBoxDebug(zone.coords, zone.data.size, zone.data.rotation)
-                        elseif zone.type == 'sphere' then DrawSphereDebug(zone.coords, zone.data.radius)
-                        elseif zone.type == 'poly' then DrawPolyDebug(zone.data.points, zone.data.minZ, zone.data.maxZ) end
+            for x = cx - 1, cx + 1 do
+                if TargetAPI.Grid[x] then
+                    for y = cy - 1, cy + 1 do
+                        if TargetAPI.Grid[x][y] then
+                            for _, zone in pairs(TargetAPI.Grid[x][y]) do
+                                if zone.debug then
+                                    hasActive = true
+                                    local checkCoord = zone.type == 'poly' and zone.data.points[1] or zone.coords
+                                    if #(plyCoords - checkCoord) < 50.0 then
+                                        if zone.type == 'box' then DrawBoxDebug(zone.coords, zone.data.size, zone.data.rotation)
+                                        elseif zone.type == 'sphere' then DrawSphereDebug(zone.coords, zone.data.radius)
+                                        elseif zone.type == 'poly' then DrawPolyDebug(zone.data.points, zone.data.minZ, zone.data.maxZ) end
+                                    end
+                                end
+                            end
+                        end
                     end
                 end
             end
@@ -86,11 +130,10 @@ local function isPointInPolygon(point, polygon)
     return oddNodes
 end
 
-local function isPointInBox(point, boxCenter, size, rotation)
-    local rad = math.rad(-rotation)
-    local cosRot, sinRot = math.cos(rad), math.sin(rad)
+local function isPointInBox(point, boxCenter, size, cosRot, sinRot)
     local dx, dy = point.x - boxCenter.x, point.y - boxCenter.y
-    local rotX, rotY = dx * cosRot - dy * sinRot, dx * sinRot + dy * cosRot
+    local rotX = dx * cosRot - dy * sinRot
+    local rotY = dx * sinRot + dy * cosRot
     return math.abs(rotX) <= (size.x / 2) and math.abs(rotY) <= (size.y / 2)
 end
 
@@ -98,7 +141,30 @@ function createZone(zoneType, coords, options, customData)
     zoneIdCounter = zoneIdCounter + 1
     local id = zoneIdCounter
 
-    TargetAPI.Zones[id] = {
+    if zoneType == 'box' then
+        local rot = customData.rotation or 0.0
+        customData.cosRot = math.cos(math.rad(-rot))
+        customData.sinRot = math.sin(math.rad(-rot))
+        -- Box bounding sphere radius
+        customData.maxRadius = math.sqrt((customData.size.x/2)^2 + (customData.size.y/2)^2 + ((customData.size.z or 2.0)/2)^2)
+    elseif zoneType == 'sphere' then
+        customData.maxRadius = customData.radius or 2.0
+    elseif zoneType == 'poly' then
+        local cx, cy, cz = 0, 0, 0
+        for _, p in ipairs(customData.points) do
+            cx = cx + p.x; cy = cy + p.y; cz = cz + p.z
+        end
+        local pts = #customData.points
+        coords = vector3(cx/pts, cy/pts, cz/pts) -- Overwrite polygon center for grid sorting
+        local maxRad = 0
+        for _, p in ipairs(customData.points) do
+            local dist = #(vector3(p.x, p.y, p.z) - coords)
+            if dist > maxRad then maxRad = dist end
+        end
+        customData.maxRadius = maxRad
+    end
+
+    local zone = {
         id = id,
         type = zoneType,
         coords = coords,
@@ -108,38 +174,47 @@ function createZone(zoneType, coords, options, customData)
         resource = customData.resource or GetInvokingResource() or "ak47_target"
     }
 
+    TargetAPI.Zones[id] = zone
+    AddZoneToGrid(zone)
+
     if customData.debug then StartDebugThread() end
     return id
 end
+exports('createZone', createZone)
 
 function GetNearbyZones(playerCoords)
     local active = {}
-    for id, zone in pairs(TargetAPI.Zones) do
-        if zone.type == 'sphere' then
-            local radius = zone.data.radius or 2.0
-            if #(playerCoords - zone.coords) <= radius then table.insert(active, zone) end
+    local cx, cy = GetChunkCoords(playerCoords.x, playerCoords.y)
 
-        elseif zone.type == 'box' then
-            if zone.data.size then
-                local zDiff = math.abs(playerCoords.z - zone.coords.z)
-                if zDiff <= ((zone.data.size.z or 2.0) / 2) and isPointInBox(playerCoords, zone.coords, zone.data.size, zone.data.rotation or 0.0) then
-                    table.insert(active, zone)
+    if TargetAPI.Grid[cx] and TargetAPI.Grid[cx][cy] then
+        for id, zone in pairs(TargetAPI.Grid[cx][cy]) do
+            local dist = #(playerCoords - zone.coords)
+            if dist <= (zone.data.maxRadius + 1.5) then 
+                if zone.type == 'sphere' then
+                    if dist <= zone.data.maxRadius then table.insert(active, zone) end
+
+                elseif zone.type == 'box' then
+                    if zone.data.size then
+                        local zDiff = math.abs(playerCoords.z - zone.coords.z)
+                        if zDiff <= ((zone.data.size.z or 2.0) / 2) and isPointInBox(playerCoords, zone.coords, zone.data.size, zone.data.cosRot, zone.data.sinRot) then
+                            table.insert(active, zone)
+                        end
+                    end
+
+                elseif zone.type == 'poly' then
+                    local zValid = true
+                    if zone.data.minZ and playerCoords.z < zone.data.minZ then zValid = false end
+                    if zone.data.maxZ and playerCoords.z > zone.data.maxZ then zValid = false end
+                    if zValid and zone.data.points and #zone.data.points >= 3 and isPointInPolygon(playerCoords, zone.data.points) then
+                        table.insert(active, zone)
+                    end
                 end
-            else
-                print("^1[ak47_target] ERROR: A box zone is missing its 'size' parameter. Check resource: " .. tostring(zone.resource) .. "^0")
-            end
-
-        elseif zone.type == 'poly' then
-            local zValid = true
-            if zone.data.minZ and playerCoords.z < zone.data.minZ then zValid = false end
-            if zone.data.maxZ and playerCoords.z > zone.data.maxZ then zValid = false end
-            if zValid and zone.data.points and #zone.data.points >= 3 and isPointInPolygon(playerCoords, zone.data.points) then
-                table.insert(active, zone)
             end
         end
     end
     return active
 end
+exports('GetNearbyZones', GetNearbyZones)
 
 function DrawZoneSprites(dict, texture, playerCoords, hoveredZones)
     local drawn = 0
@@ -155,22 +230,43 @@ function DrawZoneSprites(dict, texture, playerCoords, hoveredZones)
         end
     end
 
-    for id, zone in pairs(TargetAPI.Zones) do
-        if zone.data.drawSprite ~= false then
-            local renderCoords = zone.coords
-            if zone.type == 'poly' and zone.data.points and zone.data.points[1] then
-                renderCoords = zone.data.points[1]
-            end
+    local cx, cy = GetChunkCoords(playerCoords.x, playerCoords.y)
+    local checkedZones = {}
 
-            if renderCoords and #(playerCoords - renderCoords) < 10.0 then
-                local color = hoveredSet[id] and hoverColour or normalColour
-                SetDrawOrigin(renderCoords.x, renderCoords.y, renderCoords.z)
-                DrawSprite(dict, texture, 0, 0, width, height, 0, math.floor(color.x), math.floor(color.y), math.floor(color.z), math.floor(color.w))
-                
-                drawn = drawn + 1
-                if drawn >= 24 then break end
+    for x = cx - 1, cx + 1 do
+        if TargetAPI.Grid[x] then
+            for y = cy - 1, cy + 1 do
+                if TargetAPI.Grid[x][y] then
+                    for id, zone in pairs(TargetAPI.Grid[x][y]) do
+                        if not checkedZones[id] and zone.data.drawSprite ~= false then
+                            checkedZones[id] = true
+                            local renderCoords = zone.coords
+                            if zone.type == 'poly' and zone.data.points and zone.data.points[1] then
+                                renderCoords = zone.data.points[1]
+                            end
+
+                            if renderCoords and #(playerCoords - renderCoords) < 10.0 then
+                                local color = hoveredSet[id] and hoverColour or normalColour
+                                SetDrawOrigin(renderCoords.x, renderCoords.y, renderCoords.z)
+                                DrawSprite(dict, texture, 0, 0, width, height, 0, math.floor(color.x), math.floor(color.y), math.floor(color.z), math.floor(color.w))
+                                
+                                drawn = drawn + 1
+                                if drawn >= 24 then break end
+                            end
+                        end
+                    end
+                end
             end
         end
     end
     if drawn > 0 then ClearDrawOrigin() end
 end
+exports('DrawZoneSprites', DrawZoneSprites)
+
+function removeZone(id)
+    if TargetAPI.Zones[id] then
+        RemoveZoneFromGrid(TargetAPI.Zones[id])
+        TargetAPI.Zones[id] = nil
+    end
+end
+exports('removeZone', removeZone)

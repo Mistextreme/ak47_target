@@ -40,7 +40,7 @@ local function StopTargeting()
     end
 end
 
-local function GenerateMenuPayload(entity, entityType, model, distance, coords)
+local function GenerateMenuPayload(entity, entityType, model, distance, coords, nearbyZones)
     local menuPayload = {}
     local idCounter = 0
     ActiveOptions = {}
@@ -119,8 +119,7 @@ local function GenerateMenuPayload(entity, entityType, model, distance, coords)
     local netId = NetworkGetEntityIsNetworked(entity) and NetworkGetNetworkIdFromEntity(entity) or nil
     if netId and TargetAPI.Entities[netId] then parseOptions(TargetAPI.Entities[netId]) end
 
-    local zones = GetNearbyZones(coords)
-    for _, z in ipairs(zones) do parseOptions(z.options, z.id) end
+    for _, z in ipairs(nearbyZones) do parseOptions(z.options, z.id) end
 
     if currentMenu ~= nil then
         idCounter = idCounter + 1
@@ -144,10 +143,18 @@ local function StartTargeting()
         return
     end
 
-    if isTargeting or isMenuOpen or exports[GetCurrentResourceName()]:isDisabled() or IsPauseMenuActive() then return end
+    if isTargeting or isMenuOpen or exports['ak47_target']:isDisabled() or IsPauseMenuActive() then return end
     isTargeting = true
     SendNUIMessage({ type = "eye", state = true })
     currentMenu = nil
+
+    if Config.ShowZoneBubble and not HasStreamedTextureDictLoaded('shared') then
+        RequestStreamedTextureDict('shared', false)
+    end
+
+    local nearbyZones = {}
+    local hasTarget = false
+    local playerPed = PlayerPedId()
 
     CreateThread(function()
         local playerId = PlayerId()
@@ -159,17 +166,59 @@ local function StartTargeting()
             DisableControlAction(0, 140, true) -- Melee
             DisableControlAction(0, 141, true) -- Melee
             DisableControlAction(0, 142, true) -- Melee
+
+            if hasTarget then
+                if Config.ShowZoneBubble and HasStreamedTextureDictLoaded('shared') then
+                    DrawZoneSprites('shared', 'emptydot_32', GetEntityCoords(playerPed), nearbyZones)
+                end
+
+                if IsDisabledControlJustReleased(0, 24) then 
+                    SetCursorLocation(0.5, 0.5)
+                    SendNUIMessage({ type = "focus" })
+                    SetNuiFocus(true, true) 
+                    
+                    isTargeting = false
+                    isMenuOpen = true
+
+                    if currentTarget.entity and currentTarget.entity > 0 then
+                        CreateThread(function()
+                            local trackFlag = 511
+                            while isMenuOpen do
+                                Wait(150)
+                                
+                                if DoesEntityExist(currentTarget.entity) then
+                                    local _, entityHit, _ = Utils.RaycastCamera(10.0, trackFlag)
+                                    
+                                    if entityHit ~= currentTarget.entity then
+                                        trackFlag = trackFlag == 511 and 26 or 511
+                                        local _, _entityHit, _ = Utils.RaycastCamera(10.0, trackFlag)
+                                        if _entityHit ~= currentTarget.entity then
+                                            CloseMenu()
+                                            break
+                                        end
+                                    end
+                                else
+                                    CloseMenu()
+                                    break
+                                end
+                            end
+                        end)
+                    end
+                end
+
+                if IsDisabledControlJustReleased(0, 25) then 
+                    StopTargeting() 
+                end
+            end
         end
     end)
 
     CreateThread(function()
-        local hasTarget = false
         local flag = 511
         local lastPayloadCount = 0
-
-        if Config.ShowZoneBubble and not HasStreamedTextureDictLoaded('shared') then
-            RequestStreamedTextureDict('shared', false)
-        end
+        local lastEndCoords = vector3(0,0,0)
+        local lastEntityHit = 0
+        local lastPayload = {}
 
         while isTargeting do
             if IsPauseMenuActive() then
@@ -177,54 +226,44 @@ local function StartTargeting()
                 break
             end
 
-            local playerCoords = GetEntityCoords(PlayerPedId())
+            local playerCoords = GetEntityCoords(playerPed)
             local hit, entityHit, endCoords = Utils.RaycastCamera(10.0, flag)
+            local distance = hit and #(playerCoords - endCoords) or 0
+
+            if entityHit == 0 then
+                flag = flag == 511 and 26 or 511
+            end
 
             if hit then
-                local distance = #(playerCoords - endCoords)
                 local entityType = entityHit > 0 and GetEntityType(entityHit) or 0
-
-                if entityType == 0 then
-                    local _flag = flag == 511 and 26 or 511
-                    local _hit, _entityHit, _endCoords = Utils.RaycastCamera(10.0, _flag)
-                    local _distance = #(playerCoords - _endCoords)
-
-                    if _distance < distance then
-                        flag, hit, entityHit, endCoords, distance = _flag, _hit, _entityHit, _endCoords, _distance
-                        entityType = entityHit > 0 and GetEntityType(entityHit) or 0
-                    end
-                end
-
-                if entityHit > 0 and flag ~= 511 then
-                    if not HasEntityClearLosToEntity(entityHit, PlayerPedId(), 7) then
-                        entityHit = 0
-                        entityType = 0
-                    end
-                end
-
                 local model = (entityHit > 0 and entityType > 0) and GetEntityModel(entityHit) or nil
-                
-                if Config.ShowZoneBubble and HasStreamedTextureDictLoaded('shared') then
-                    DrawZoneSprites('shared', 'emptydot_32', playerCoords, GetNearbyZones(endCoords))
+
+                local payload
+                local distMoved = #(endCoords - lastEndCoords)
+
+                if distMoved > 1.0 or entityHit ~= lastEntityHit or lastPayloadCount == 0 then
+                    nearbyZones = GetNearbyZones(endCoords) 
+                    payload = GenerateMenuPayload(entityHit, entityType, model, distance, endCoords, nearbyZones)
+                    
+                    lastEndCoords = endCoords
+                    lastEntityHit = entityHit
+                    lastPayload = payload
+                else
+                    payload = lastPayload
                 end
 
-                local payload = GenerateMenuPayload(entityHit, entityType, model, distance, endCoords)
                 local isValid = #payload > 0
 
                 if isValid ~= hasTarget then
                     hasTarget = isValid
                     if hasTarget then
                         lastPayloadCount = #payload
-                        if Config.HideEyeWhenTargetAvailable then
-                            SendNUIMessage({ type = "eye", state = false })
-                        end
+                        if Config.HideEyeWhenTargetAvailable then SendNUIMessage({ type = "eye", state = false }) end
                         SendNUIMessage({ type = "open", menu = payload })
                     else
                         lastPayloadCount = 0
                         SendNUIMessage({ type = "close" })
-                        if Config.HideEyeWhenTargetAvailable then
-                            SendNUIMessage({ type = "eye", state = true })
-                        end
+                        if Config.HideEyeWhenTargetAvailable then SendNUIMessage({ type = "eye", state = true }) end
                     end
                 elseif hasTarget and #payload ~= lastPayloadCount then
                     lastPayloadCount = #payload
@@ -246,60 +285,12 @@ local function StartTargeting()
                     end
                 end
 
-                if IsDisabledControlJustReleased(0, 24) and hasTarget then 
-                    SetCursorLocation(0.5, 0.5)
-                    SendNUIMessage({ type = "focus" })
-                    SetNuiFocus(true, true) 
-                    
-                    Wait(10)
-
+                if hasTarget then 
                     currentTarget = { entity = entityHit, coords = endCoords, distance = distance }
-                    isTargeting = false
-                    isMenuOpen = true
-
-                    if currentTarget.entity and currentTarget.entity > 0 then
-                        CreateThread(function()
-                            local flag = 511
-
-                            while isMenuOpen do
-                                Wait(100)
-                                
-                                if DoesEntityExist(currentTarget.entity) then
-                                    local hit, entityHit, endCoords = Utils.RaycastCamera(10.0, flag)
-                                    
-                                    if entityHit == 0 then
-                                        local _flag = flag == 511 and 26 or 511
-                                        local _, _entityHit, _ = Utils.RaycastCamera(10.0, _flag)
-                                        if _entityHit == currentTarget.entity then
-                                            entityHit = _entityHit
-                                            flag = _flag
-                                        end
-                                    end
-
-                                    if entityHit ~= currentTarget.entity then
-                                        CloseMenu()
-                                        break
-                                    end
-                                else
-                                    CloseMenu()
-                                    break
-                                end
-                            end
-                        end)
-                    end
                 end
-
-                if IsDisabledControlJustReleased(0, 25) then 
-                    StopTargeting() 
-                end
-
             end
 
-            if not hasTarget then
-                flag = flag == 511 and 26 or 511
-            end
-
-            Wait(hit and 1 or 100) 
+            Wait(hit and 75 or 125) 
         end
         
         if Config.ShowZoneBubble and HasStreamedTextureDictLoaded('shared') then
@@ -326,13 +317,13 @@ RegisterNUICallback('clicked', function(data, cb)
     if option then
         if option.builtin == 'goback' then
             currentMenu = table.remove(menuHistory)
-            local payload = GenerateMenuPayload(currentTarget.entity, GetEntityType(currentTarget.entity), GetEntityModel(currentTarget.entity), currentTarget.distance, currentTarget.coords)
+            local payload = GenerateMenuPayload(currentTarget.entity, GetEntityType(currentTarget.entity), GetEntityModel(currentTarget.entity), currentTarget.distance, currentTarget.coords, GetNearbyZones(currentTarget.coords))
             SendNUIMessage({ type = "open", menu = payload })
             return
         elseif option.openMenu then
             table.insert(menuHistory, currentMenu)
             currentMenu = option.openMenu
-            local payload = GenerateMenuPayload(currentTarget.entity, GetEntityType(currentTarget.entity), GetEntityModel(currentTarget.entity), currentTarget.distance, currentTarget.coords)
+            local payload = GenerateMenuPayload(currentTarget.entity, GetEntityType(currentTarget.entity), GetEntityModel(currentTarget.entity), currentTarget.distance, currentTarget.coords, GetNearbyZones(currentTarget.coords))
             SendNUIMessage({ type = "open", menu = payload })
             return
         end
