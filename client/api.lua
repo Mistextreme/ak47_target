@@ -328,6 +328,9 @@ end
 exports('addPolyZone', addPolyZone)
 ExportHandler('addPolyZone', addPolyZone)
 
+ExportHandler('removeZone', removeZone)
+exports('removeZone', removeZone)
+
 -- =================================================================
 -- 8. RESOURCE STOP CLEANUP (AUTO-REMOVE TARGETS & ZONES)
 -- =================================================================
