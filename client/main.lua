@@ -170,11 +170,11 @@ local function StartTargeting()
             DisableControlAction(0, 141, true) -- Melee
             DisableControlAction(0, 142, true) -- Melee
 
-            if hasTarget then
-                if Config.ShowZoneBubble and HasStreamedTextureDictLoaded('shared') then
-                    DrawZoneSprites('shared', 'emptydot_32', GetEntityCoords(playerPed), nearbyZones)
-                end
+            if Config.ShowZoneBubble and HasStreamedTextureDictLoaded('shared') then
+                DrawZoneSprites('shared', 'emptydot_32', GetEntityCoords(playerPed), nearbyZones)
+            end
 
+            if hasTarget then
                 if IsDisabledControlJustReleased(0, 24) then 
                     SetCursorLocation(0.5, 0.5)
                     SendNUIMessage({ type = "focus" })

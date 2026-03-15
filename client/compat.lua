@@ -143,18 +143,13 @@ ExportHandler('AddBoxZone', function(isQtarget, invokingResource, name, center, 
     if not options.minZ then options.minZ = -100 end
     if not options.maxZ then options.maxZ = 800 end
 
-    if not options.useZ then
-        z = z + math.abs(options.maxZ - options.minZ) / 2
-        center = vec3(center.x, center.y, z)
-    end
-
     local formattedOpts = FormatOptions(targetoptions, isQtarget, invokingResource)
     formattedOpts._legacyName = name
 
     return exports['ak47_target']:addBoxZone({
         name = name,
         coords = center,
-        size = vec3(width, length, (options.useZ or not options.maxZ) and center.z or math.abs(options.maxZ - options.minZ)),
+        size = vec3(width, length, math.abs(options.maxZ - options.minZ)),
         debug = options.debugPoly,
         rotation = options.heading,
         options = formattedOpts,
